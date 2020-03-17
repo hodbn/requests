@@ -24,6 +24,32 @@ def test_chunked_upload():
     assert r.request.headers['Transfer-Encoding'] == 'chunked'
 
 
+def test_chunked_upload_uses_only_specified_host_header():
+    """Ensure we use only the specified Host header for chunked requests."""
+    text_200 = (b'HTTP/1.1 200 OK\r\n'
+                b'Content-Length: 0\r\n\r\n')
+    wanted_host = 'sample-host'
+    expected_header = 'Host: {}'.format(wanted_host).encode('utf-8')
+    def single_host_resp_handler(sock):
+        request_content = consume_socket_content(sock, timeout=0.5)
+        assert expected_header in request_content
+        assert request_content.count(b'Host: ') == 1
+        sock.send(text_200)
+
+        return request_content
+
+    close_server = threading.Event()
+    server = Server(single_host_resp_handler, wait_to_close_event=close_server)
+    data = iter([b'a', b'b', b'c'])
+
+    with server as (host, port):
+        url = 'http://{}:{}/'.format(host, port)
+        r = requests.post(url, data=data, headers={'Host': wanted_host}, stream=True)
+        close_server.set()  # release server block
+
+    assert r.status_code == 200
+
+
 def test_digestauth_401_count_reset_on_redirect():
     """Ensure we correctly reset num_401_calls after a successful digest auth,
     followed by a 302 redirect to another digest auth prompt.
